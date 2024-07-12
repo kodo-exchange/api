@@ -5,7 +5,7 @@ from web3.constants import ADDRESS_ZERO
 
 from app.settings import (
     LOGGER, CACHE, VOTER_ADDRESS,
-    DEFAULT_TOKEN_ADDRESS, WRAPPED_BRIBE_FACTORY_ADDRESS, VE_ADDRESS
+    DEFAULT_TOKEN_ADDRESS, VE_ADDRESS
 )
 from app.assets import Token
 
@@ -23,7 +23,6 @@ class Gauge(Model):
     total_supply = FloatField()
     bribe_address = TextField(index=True)
     fees_address = TextField(index=True)
-    wrapped_bribe_address = TextField(index=True)
     # Per epoch...
     reward = FloatField()
 
@@ -35,8 +34,15 @@ class Gauge(Model):
     tbv = FloatField(default=0.0)
     # Voting APR
     votes = FloatField(default=0.0)
+    apr_rebase = FloatField(default=0.0)
     apr = FloatField(default=0.0)
 
+    # Trading fees for the upcoming voting epoch
+    # Also used to estimate trading volume
+    fee_claimable0 = FloatField(default=0.0)
+    fee_claimable1 = FloatField(default=0.0)
+    fee_claimable_value = FloatField(default=0.0)
+    
     # TODO: Backwards compat. Remove once no longer needed...
     bribeAddress = TextField()
     feesAddress = TextField()
@@ -58,6 +64,10 @@ class Gauge(Model):
         """Fetches pair/pool gauge data from chain."""
         address = address.lower()
 
+        # Avoid circular import...
+        from app.pairs.model import Pair
+        pair = Pair.get(Pair.gauge_address == address)
+
         pair_gauge_multi = Multicall([
             Call(
                 address,
@@ -78,12 +88,28 @@ class Gauge(Model):
                 VOTER_ADDRESS,
                 ['internal_bribes(address)(address)', address],
                 [['fees_address', None]]
+            ),
+            Call(
+                pair.address,
+                ['claimable0(address)(uint256)', address],
+                [['fee_claimable0', None]]
+            ),
+            Call(
+                pair.address,
+                ['claimable1(address)(uint256)', address],
+                [['fee_claimable1', None]]
             )
         ])
 
         data = pair_gauge_multi()
         data['decimals'] = cls.DEFAULT_DECIMALS
         data['total_supply'] = data['total_supply'] / data['decimals']
+
+        token0 = Token.find(pair.token0_address)
+        token1 = Token.find(pair.token1_address)
+        data['fee_claimable0'] = data['fee_claimable0'] / (10**token0.decimals)
+        data['fee_claimable1'] = data['fee_claimable1'] / (10**token1.decimals)
+        data['fee_claimable_value'] = (data['fee_claimable0'] * token0.price) + (data['fee_claimable1'] * token1.price)
 
         token = Token.find(DEFAULT_TOKEN_ADDRESS)
         data['reward'] = (
@@ -95,22 +121,13 @@ class Gauge(Model):
         data['feesAddress'] = data['fees_address']
         data['totalSupply'] = data['total_supply']
 
-        if data.get('bribe_address') not in (ADDRESS_ZERO, None):
-            data['wrapped_bribe_address'] = Call(
-                WRAPPED_BRIBE_FACTORY_ADDRESS,
-                ['oldBribeToNew(address)(address)', data['bribe_address']]
-            )()
-
-        if data.get('wrapped_bribe_address') in (ADDRESS_ZERO, ''):
-            del data['wrapped_bribe_address']
-
         # Cleanup old data
         cls.query_delete(cls.address == address.lower())
 
-        gauge = cls.create(address=address, **data)
+        gauge = cls.create(address=address.lower(), **data)
         LOGGER.debug('Fetched %s:%s.', cls.__name__, address)
 
-        if data.get('wrapped_bribe_address') not in (ADDRESS_ZERO, None):
+        if data.get('bribe_address') not in (ADDRESS_ZERO, None):
             cls._fetch_external_rewards(gauge)
 
         cls._fetch_internal_rewards(gauge)
@@ -129,7 +146,10 @@ class Gauge(Model):
             ['calculate_growth(uint256)(uint256)', weekly]
         )()
 
-        return ((growth * 52) / supply) * 100
+        if supply == 0: # prevent pre-launch 0 division
+            return 0
+        else:
+            return ((growth * 52) / supply) * 100
 
     @classmethod
     def _update_apr(cls, gauge):
@@ -147,18 +167,20 @@ class Gauge(Model):
         token = Token.find(DEFAULT_TOKEN_ADDRESS)
         votes = votes / 10**token.decimals
 
+        gauge.apr_rebase = cls.rebase_apr()
         gauge.apr = cls.rebase_apr()
 
         if token.price and votes * token.price > 0:
             gauge.votes = votes
             gauge.apr += ((gauge.tbv * 52) / (votes * token.price)) * 100
-            gauge.save()
+        
+        gauge.save()
 
     @classmethod
     def _fetch_external_rewards(cls, gauge):
         """Fetches gauge external rewards (bribes) data from chain."""
         tokens_len = Call(
-            gauge.wrapped_bribe_address,
+            gauge.bribe_address,
             'rewardsListLength()(uint256)'
         )()
 
@@ -166,13 +188,13 @@ class Gauge(Model):
 
         for idx in range(0, tokens_len):
             bribe_token_address = Call(
-                gauge.wrapped_bribe_address,
+                gauge.bribe_address,
                 ['rewards(uint256)(address)', idx]
             )()
 
             reward_calls.append(
                 Call(
-                    gauge.wrapped_bribe_address,
+                    gauge.bribe_address,
                     ['left(address)(uint256)', bribe_token_address],
                     [[bribe_token_address, None]]
                 )

@@ -12,7 +12,6 @@ from app.settings import (
     LOGGER, CACHE, FACTORY_ADDRESS, VOTER_ADDRESS, DEFAULT_TOKEN_ADDRESS
 )
 
-
 class Pair(Model):
     """Liquidity pool pairs model."""
     __database__ = CACHE
@@ -66,10 +65,12 @@ class Pair(Model):
             return
 
         token = Token.find(DEFAULT_TOKEN_ADDRESS)
-        token_price = token.chain_price_in_stables()
+        # token_price = token.chain_price_in_stables()
 
-        daily_apr = (gauge.reward * token_price) / self.tvl * 100
-
+        daily_apr = 0
+        if token.price:
+            daily_apr = (gauge.reward * token.price) / self.tvl * 100
+        
         self.apr = daily_apr * 365
         self.save()
 

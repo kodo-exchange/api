@@ -17,11 +17,12 @@ setup(
         'bjoern == 3.2.2',
         'web3 == 5.27',
         'eth_retry == 0.1.13',
-        'multicall == 0.7',
+        'multicall @ git+https://github.com/kodo-exchange/multicall.py.git@taiko',
         'redis == 4.4.0',
         'fakeredis == 2.4.0',
         'walrus == 0.9.2',
         'honeybadger == 0.14.0',
+        'mysql-connector-python == 8.3.0',
         # TODO: Bump when the issue is fixed upstream:
         #     https://github.com/ilanschnell/bitarray/issues/188
         'bitarray == 2.7.2'

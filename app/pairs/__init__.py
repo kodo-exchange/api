@@ -29,6 +29,7 @@ class Pairs(object):
 
             if pair.gauge_address:
                 gauge = Gauge.find(pair.gauge_address)
+
                 data['gauge'] = gauge._data
                 data['gauge']['bribes'] = []
 
@@ -36,9 +37,9 @@ class Pairs(object):
                     data['gauge']['bribes'].append(
                         dict(
                             token=Token.find(token_addr)._data,
-                            reward_ammount=float(reward_ammount),
+                            reward_amount=float(reward_ammount),
                             # TODO: Backwards compat...
-                            rewardAmmount=float(reward_ammount)
+                            rewardAmount=float(reward_ammount)
                         )
                     )
 

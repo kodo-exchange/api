@@ -1,6 +1,6 @@
-# Velodrome Finance HTTP API 🚲💨🕸️
+# Kodo Exchange HTTP API 🥁
 
-Velodrome Finance HTTP API is used by our app to fetch tokens and liquidity
+Kodo Exchange HTTP API is used by our app to fetch tokens and liquidity
 pool pairs.
 
 Please make sure you have [Docker](https://docs.docker.com/install/) first.

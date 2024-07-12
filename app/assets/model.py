@@ -8,10 +8,9 @@ from web3.auto import w3
 from web3.exceptions import ContractLogicError
 
 from app.settings import (
-    LOGGER, CACHE, TOKENLISTS, ROUTER_ADDRESS, STABLE_TOKEN_ADDRESS,
+    LOGGER, CACHE, TOKENLISTS, ROUTER_ADDRESS, STABLE_TOKEN_ADDRESS, WETH_ADDRESS,
     IGNORED_TOKEN_ADDRESSES
 )
-
 
 class Token(Model):
     """ERC20 token model."""
@@ -165,6 +164,62 @@ class Token(Model):
             requests.exceptions.JSONDecodeError
         ):
             return price
+    
+    def mock_eth_price(self):
+        '''Returns the price of ETH on Optimism.'''
+        weth_optimism_token = 'optimism:0x4200000000000000000000000000000000000006'
+
+        res = requests.get(self.DEFILLAMA_ENDPOINT + weth_optimism_token).json()
+        coins = res.get('coins', {})
+
+        for (_, coin) in coins.items():
+            return coin.get('price', 0)
+
+        return 0
+
+    
+    def mock_aggregated_price_in_stables(self):
+        """Returns the price quoted from an aggregator in stables/USDC."""
+        # Peg it forever.
+        if self.address == STABLE_TOKEN_ADDRESS:
+            return 1.0
+        
+        if self.address == WETH_ADDRESS:
+            return self.mock_eth_price()
+
+        weth = Token.find(WETH_ADDRESS)
+        try:
+            amount, is_stable = Call(
+                ROUTER_ADDRESS,
+                [
+                    'getAmountOut(uint256,address,address)(uint256,bool)',
+                    1 * 10**self.decimals,
+                    self.address,
+                    weth.address
+                ]
+            )()
+        except ContractLogicError:
+            return 0
+
+        return amount * weth.price / 10**weth.decimals
+
+        # import os
+
+        # PRICE_MAP = {
+        #     os.getenv('WETH_ADDRESS').lower(): 3590.03, # WETH
+        #     os.getenv('TKO_ADDRESS').lower(): 3.6075, # TKO
+        #     os.getenv('LRC_ADDRESS').lower(): 0.229513, # LRC
+        #     os.getenv('USDC_ADDRESS').lower(): 1.022, # USDC
+        #     os.getenv('MIM_ADDRESS').lower(): 0.999039, # MIM
+        #     os.getenv('KDO_ADDRESS').lower(): 0.0943, # KDO
+        #     os.getenv('HORSE_ADDRESS').lower(): 0.03, # WETH
+        #     os.getenv('NOTCH_ADDRESS').lower(): 0.003, # NOTCH
+        #     os.getenv('WSXETH_ADDRESS').lower(): 3590, # 
+        #     os.getenv('KITTY_ADDRESS').lower(): 0.001, # KITTY
+        # }
+        
+        # return PRICE_MAP[self.address.lower()]
+
 
     def chain_price_in_stables(self):
         """Returns the price quoted from our router in stables/USDC."""
@@ -201,7 +256,8 @@ class Token(Model):
 
     def _update_price(self):
         """Updates the token price in USD from different sources."""
-        self.price = self.aggregated_price_in_stables()
+        # self.price = self.aggregated_price_in_stables()
+        self.price = self.mock_aggregated_price_in_stables() # TODO: for test
 
         if self.price == 0:
             self.price = self.chain_price_in_stables()
@@ -237,9 +293,11 @@ class Token(Model):
         """Fetches and merges all the tokens from available tokenlists."""
         our_chain_id = w3.eth.chain_id
 
+        import os
         for tlist in TOKENLISTS:
             try:
                 res = requests.get(tlist).json()
+                
                 for token_data in res['tokens']:
                     # Skip tokens from other chains...
                     if token_data.get('chainId', None) != our_chain_id:
@@ -261,6 +319,7 @@ class Token(Model):
                     LOGGER.debug(
                         'Loaded %s:%s.', cls.__name__, token_data['address']
                     )
+
             except Exception as error:
                 LOGGER.error(error)
                 continue

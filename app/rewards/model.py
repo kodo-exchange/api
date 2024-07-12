@@ -172,7 +172,7 @@ class BribeReward(FeeReward):
 
             calls.append(
                 Call(
-                    gauge.wrapped_bribe_address,
+                    gauge.bribe_address,
                     [
                         'earned(address,uint256)(uint256)',
                         bribe_token_addr.decode('utf-8'),

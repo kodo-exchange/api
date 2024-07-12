@@ -26,7 +26,7 @@ class Configuration(object):
         conf = json.dumps(
             dict(
                 data=[
-                    default_token._data,
+                    # default_token._data,
                     stable_token._data,
                     *route_token_data
                 ],
